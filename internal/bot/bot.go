@@ -2,18 +2,24 @@
 package bot
 
 import (
+	"fmt"
 	"log"
 	"salary-bot/internal/bot/state"
+	"salary-bot/internal/salary/model"
+	"salary-bot/internal/salary/service"
+	"strconv"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type telegramBot struct {
-	client *tgbotapi.BotAPI
-	state  *state.Manager
+	client        *tgbotapi.BotAPI
+	state         *state.Manager
+	salaryService service.Service
 }
 
-func NewBot(token string) (Bot, error) {
+func NewBot(token string, salarySvc service.Service) (Bot, error) {
 	client, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
@@ -23,8 +29,9 @@ func NewBot(token string) (Bot, error) {
 	log.Printf("Авторизован бот: @%s", client.Self.UserName)
 
 	return &telegramBot{
-		client: client,
-		state:  state.NewManager(),
+		client:        client,
+		state:         state.NewManager(),
+		salaryService: salarySvc,
 	}, nil
 }
 
@@ -44,9 +51,14 @@ func (b *telegramBot) Start() {
 		// Логируем
 		log.Printf("[ChatID=%d] %s", chatID, text)
 
-		// Обработка команды /start
-		if text == "/start" {
-			b.handleStart(chatID)
+		if update.Message.IsCommand() {
+			switch update.Message.Command() {
+			case "start", "restart":
+				b.handleStart(chatID)
+			default:
+				msg := tgbotapi.NewMessage(chatID, "Неизвестная команда. Напишите /start.")
+				b.client.Send(msg)
+			}
 			continue
 		}
 
@@ -147,21 +159,22 @@ func (b *telegramBot) handleTechSelection(chatID int64, tech string) {
 	b.client.Send(msg)
 }
 
-func (b *telegramBot) handleExperienceSelection(chatID int64, exp string) {
+func (b *telegramBot) handleExperienceSelection(chatID int64, expInput string) {
 	validExp := map[string]bool{
 		"0": true, "1": true, "2": true, "3": true,
 		"4": true, "5": true, "6": true, "более 6": true,
 	}
 
-	if !validExp[exp] {
-		// Повторяем вопрос
-		expButtons := make([]tgbotapi.KeyboardButton, 0)
-		for _, e := range []string{"0", "1", "2", "3", "4", "5", "6", "более 6"} {
+	if !validExp[expInput] {
+		// Повтор вопроса (как раньше)
+		expOptions := []string{"0", "1", "2", "3", "4", "5", "6", "более 6"}
+		var expButtons []tgbotapi.KeyboardButton
+		for _, e := range expOptions {
 			expButtons = append(expButtons, tgbotapi.NewKeyboardButton(e))
 		}
 		keyboard := tgbotapi.NewReplyKeyboard(
-			tgbotapi.NewKeyboardButtonRow(expButtons[:4]...),
-			tgbotapi.NewKeyboardButtonRow(expButtons[4:]...),
+			tgbotapi.NewKeyboardButtonRow(expButtons[0], expButtons[1], expButtons[2], expButtons[3]),
+			tgbotapi.NewKeyboardButtonRow(expButtons[4], expButtons[5], expButtons[6], expButtons[7]),
 		)
 		keyboard.OneTimeKeyboard = true
 		keyboard.ResizeKeyboard = true
@@ -172,28 +185,114 @@ func (b *telegramBot) handleExperienceSelection(chatID int64, exp string) {
 		return
 	}
 
-	// Получаем полное состояние
+	// Получаем состояние
 	userState := b.state.Get(chatID)
-	userState.Experience = exp
+	userState.Experience = expInput
 
-	// Формируем ответ
-	response := "Вас интересует зарплата для IT для работы с " + userState.Tech + " и опыт работы " + exp
-	if exp == "0" {
-		response += " лет"
-	} else if exp == "1" {
-		response += " год"
-	} else if exp == "более 6" {
-		response += " лет"
+	// Преобразуем опыт в число
+	var expYears int
+	if expInput == "более 6" {
+		expYears = 7
 	} else {
-		// 2–6 → "года" или "лет"?
-		// Для простоты — "лет"
-		response += " лет"
+		expYears, _ = strconv.Atoi(expInput)
 	}
 
-	// Отправляем итог
+	// Формируем фильтр
+	filter := &model.FilterDTO{
+		Tech: &userState.Tech,
+		Type: strPtr("remote"),
+	}
+
+	// Опыт: ищем записи, где диапазон покрывает пользователя
+	filter.ExperienceMin = &expYears // записи с experience_max >= expYears
+	filter.ExperienceMax = &expYears // записи с experience_min <= expYears
+
+	// Дата: последние 30 дней
+	thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Format("2006-01-02 15:04:05")
+	filter.CreatedAtFrom = &thirtyDaysAgo
+
+	// Вызываем сервис напрямую
+	salaries, err := b.salaryService.Filter(filter)
+	if err != nil {
+		log.Printf("Ошибка фильтрации: %v", err)
+		msg := tgbotapi.NewMessage(chatID, "Не удалось получить данные. Попробуйте позже.")
+		b.client.Send(msg)
+		b.state.Clear(chatID)
+		return
+	}
+
+	// Расчёт среднего
+	avgMin, avgMax := b.calculateAverage(salaries)
+
+	// Формируем ответ
+	var response string
+	if avgMin == 0 && avgMax == 0 {
+		response = fmt.Sprintf("К сожалению, нет данных о зарплатах для %s с опытом %s год(а/лет) на удалёнке за последние 30 дней.", userState.Tech, expInput)
+	} else {
+		minStr := "не указано"
+		maxStr := "не указано"
+		if avgMin > 0 {
+			minStr = formatSalary(avgMin)
+		}
+		if avgMax > 0 {
+			maxStr = formatSalary(avgMax)
+		}
+		response = fmt.Sprintf(
+			"Для программиста %s с опытом работы %s год(а/лет) средняя зарплата на удалёнке находится в диапазоне от %s до %s.",
+			userState.Tech,
+			expInput,
+			minStr,
+			maxStr,
+		)
+	}
+
 	msg := tgbotapi.NewMessage(chatID, response)
 	b.client.Send(msg)
-
-	// Сбрасываем состояние (диалог завершён)
 	b.state.Clear(chatID)
+}
+
+func strPtr(s string) *string {
+	return &s
+}
+
+func (b *telegramBot) calculateAverage(salaries []*model.Salary) (avgMin, avgMax int) {
+	if len(salaries) == 0 {
+		return 0, 0
+	}
+
+	var sumMin, sumMax, countMin, countMax int64
+	for _, s := range salaries {
+		if s.SalaryMin > 0 {
+			sumMin += int64(s.SalaryMin)
+			countMin++
+		}
+		if s.SalaryMax > 0 {
+			sumMax += int64(s.SalaryMax)
+			countMax++
+		}
+	}
+
+	if countMin > 0 {
+		avgMin = int(sumMin / countMin)
+	}
+	if countMax > 0 {
+		avgMax = int(sumMax / countMax)
+	}
+
+	return avgMin, avgMax
+}
+
+func formatSalary(amount int) string {
+	s := fmt.Sprintf("%d", amount)
+	if len(s) <= 3 {
+		return s
+	}
+	var result string
+	for i := len(s) - 1; i >= 0; i-- {
+		if (len(s)-1-i)%3 == 0 && i != len(s)-1 {
+			result = " " + result
+		}
+		result = string(s[i]) + result
+	}
+	return result + " ₽"
 }

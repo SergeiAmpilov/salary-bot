@@ -28,19 +28,19 @@ func main() {
 	db := storage.NewStorage("./data/salary.db")
 	defer db.DB.Close()
 
+	// Слои
+	sRepo := repository.New(db.DB)
+	sSvc := service.New(sRepo)
+	sHandler := handler.NewSalaryHandler(sSvc)
+
 	// Telegram Bot
-	tgBot, err := bot.NewBot(cfg.TelegramBotToken)
+	tgBot, err := bot.NewBot(cfg.TelegramBotToken, sSvc)
 	if err != nil {
 		log.Fatal("Не удалось инициализировать Telegram бота:", err)
 	}
 
 	// Запуск бота в отдельной горутине
 	go tgBot.Start()
-
-	// Слои
-	sRepo := repository.New(db.DB)
-	sSvc := service.New(sRepo)
-	sHandler := handler.NewSalaryHandler(sSvc)
 
 	// Fiber
 	app := fiber.New()
