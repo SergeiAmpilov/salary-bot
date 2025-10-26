@@ -3,6 +3,7 @@ package main
 
 import (
 	"log"
+	"salary-bot/internal/bot"
 	"salary-bot/internal/config"
 	"salary-bot/internal/router"
 	"salary-bot/internal/salary/handler"
@@ -26,6 +27,15 @@ func main() {
 	// БД
 	db := storage.NewStorage("./data/salary.db")
 	defer db.DB.Close()
+
+	// Telegram Bot
+	tgBot, err := bot.NewBot(cfg.TelegramBotToken)
+	if err != nil {
+		log.Fatal("Не удалось инициализировать Telegram бота:", err)
+	}
+
+	// Запуск бота в отдельной горутине
+	go tgBot.Start()
 
 	// Слои
 	sRepo := repository.New(db.DB)

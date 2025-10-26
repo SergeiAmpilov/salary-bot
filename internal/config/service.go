@@ -9,7 +9,8 @@ import (
 
 // Config хранит все переменные окружения приложения
 type Config struct {
-	Port string
+	Port             string
+	TelegramBotToken string
 }
 
 // envConfigService реализует ConfigReader
@@ -26,6 +27,7 @@ func (s *envConfigService) Read() (*Config, error) {
 	_ = godotenv.Load()
 
 	return &Config{
-		Port: os.Getenv("PORT"),
+		Port:             os.Getenv("PORT"),
+		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 	}, nil
 }
