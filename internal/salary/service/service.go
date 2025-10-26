@@ -15,19 +15,14 @@ func New(repo repository.Repository) Service {
 }
 
 func (s *salaryService) Create(dto *model.CreateSalaryDTO) error {
-	salary := &model.Salary{
-		Tech:          dto.Tech,
-		SalaryMin:     dto.SalaryMin,
-		SalaryMax:     dto.SalaryMax,
-		Type:          dto.Type,
-		ExperienceMin: dto.ExperienceMin,
-		ExperienceMax: dto.ExperienceMax,
-		// CreatedAt будет установлен автоматически в БД
-	}
-
+	salary := dto.ToEntity()
 	return s.repo.Create(salary)
 }
 
 func (s *salaryService) GetAll() ([]*model.Salary, error) {
 	return s.repo.List()
+}
+
+func (s *salaryService) Filter(filter *model.FilterDTO) ([]*model.Salary, error) {
+	return s.repo.Filter(filter)
 }

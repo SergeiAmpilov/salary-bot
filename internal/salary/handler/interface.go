@@ -7,4 +7,5 @@ import "github.com/gofiber/fiber/v2"
 type Handler interface {
 	Add(c *fiber.Ctx) error
 	List(c *fiber.Ctx) error
+	Filter(c *fiber.Ctx) error
 }

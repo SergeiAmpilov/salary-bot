@@ -25,6 +25,16 @@ func (h *salaryHandler) Add(c *fiber.Ctx) error {
 		})
 	}
 
+	if err := dto.Validate(); err != nil {
+		return c.
+			Status(fiber.StatusBadRequest).
+			JSON(fiber.Map{
+				"error":   "Validation failed",
+				"details": err.Error(),
+			})
+		return err // вернём ошибку валидации — хендлер сам обработает
+	}
+
 	if err := h.service.Create(&dto); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save salary data",
@@ -41,6 +51,25 @@ func (h *salaryHandler) List(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to fetch salary data",
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(salaries)
+}
+
+func (h *salaryHandler) Filter(c *fiber.Ctx) error {
+	var filter model.FilterDTO
+
+	if err := c.BodyParser(&filter); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid JSON",
+		})
+	}
+
+	salaries, err := h.service.Filter(&filter)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to apply filter",
 		})
 	}
 

@@ -20,4 +20,5 @@ func SetupRoutes(app *fiber.App, sHandler handler.Handler) {
 	// Эндпоинт для добавления данных о вакансии
 	app.Post("/vacancy", sHandler.Add)
 	app.Get("/salary", sHandler.List)
+	app.Post("/filter", sHandler.Filter)
 }
