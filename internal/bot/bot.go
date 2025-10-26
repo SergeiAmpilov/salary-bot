@@ -246,7 +246,16 @@ func (b *telegramBot) handleExperienceSelection(chatID int64, expInput string) {
 		)
 	}
 
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("/start"),
+		),
+	)
+	keyboard.OneTimeKeyboard = false // оставляем клавиатуру видимой
+	keyboard.ResizeKeyboard = true
+
 	msg := tgbotapi.NewMessage(chatID, response)
+	msg.ReplyMarkup = keyboard
 	b.client.Send(msg)
 	b.state.Clear(chatID)
 }
