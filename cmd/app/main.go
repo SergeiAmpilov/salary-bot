@@ -9,7 +9,9 @@ import (
 	"salary-bot/internal/salary/handler"
 	"salary-bot/internal/salary/repository"
 	"salary-bot/internal/salary/service"
+	stathandler "salary-bot/internal/stat/handler"
 	"salary-bot/internal/storage"
+	userrepository "salary-bot/internal/user/repository"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -28,13 +30,16 @@ func main() {
 	db := storage.NewStorage("./data/salary.db")
 	defer db.DB.Close()
 
+	userRepo := userrepository.New(db.DB)
+
 	// Слои
 	sRepo := repository.New(db.DB)
 	sSvc := service.New(sRepo)
 	sHandler := handler.NewSalaryHandler(sSvc)
+	statHandler := stathandler.NewStatHandler(userRepo)
 
 	// Telegram Bot
-	tgBot, err := bot.NewBot(cfg.TelegramBotToken, sSvc)
+	tgBot, err := bot.NewBot(cfg.TelegramBotToken, sSvc, userRepo)
 	if err != nil {
 		log.Fatal("Не удалось инициализировать Telegram бота:", err)
 	}
@@ -48,7 +53,7 @@ func main() {
 	app.Use(recover.New())
 
 	// Роуты
-	router.SetupRoutes(app, sHandler)
+	router.SetupRoutes(app, sHandler, statHandler)
 
 	// Запуск
 	log.Printf("Сервер запущен на порту %s", cfg.Port)

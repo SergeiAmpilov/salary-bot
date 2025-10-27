@@ -10,16 +10,23 @@ import (
 	"strconv"
 	"time"
 
+	userrepo "salary-bot/internal/user/repository"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type telegramBot struct {
-	client        *tgbotapi.BotAPI
-	state         *state.Manager
-	salaryService service.Service
+	client         *tgbotapi.BotAPI
+	state          *state.Manager
+	salaryService  service.Service
+	userRepository userrepo.Repository
 }
 
-func NewBot(token string, salarySvc service.Service) (Bot, error) {
+func NewBot(
+	token string,
+	salarySvc service.Service,
+	userRepo userrepo.Repository,
+) (Bot, error) {
 	client, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
@@ -29,9 +36,10 @@ func NewBot(token string, salarySvc service.Service) (Bot, error) {
 	log.Printf("Авторизован бот: @%s", client.Self.UserName)
 
 	return &telegramBot{
-		client:        client,
-		state:         state.NewManager(),
-		salaryService: salarySvc,
+		client:         client,
+		state:          state.NewManager(),
+		salaryService:  salarySvc,
+		userRepository: userRepo,
 	}, nil
 }
 
@@ -45,11 +53,16 @@ func (b *telegramBot) Start() {
 			continue
 		}
 
+		user := update.Message.From
+
 		chatID := update.Message.Chat.ID
 		text := update.Message.Text
 
 		// Логируем
 		log.Printf("[ChatID=%d] %s", chatID, text)
+
+		// Обновляем/создаём пользователя
+		_ = b.userRepository.Upsert(user.ID, user.UserName, user.FirstName)
 
 		if update.Message.IsCommand() {
 			switch update.Message.Command() {
@@ -72,7 +85,7 @@ func (b *telegramBot) Start() {
 		case state.StepAwaitingTech:
 			b.handleTechSelection(chatID, text)
 		case state.StepAwaitingExperience:
-			b.handleExperienceSelection(chatID, text)
+			b.handleExperienceSelection(chatID, text, user.ID)
 		}
 	}
 }
@@ -159,7 +172,7 @@ func (b *telegramBot) handleTechSelection(chatID int64, tech string) {
 	b.client.Send(msg)
 }
 
-func (b *telegramBot) handleExperienceSelection(chatID int64, expInput string) {
+func (b *telegramBot) handleExperienceSelection(chatID int64, expInput string, userID int64) {
 	validExp := map[string]bool{
 		"0": true, "1": true, "2": true, "3": true,
 		"4": true, "5": true, "6": true, "более 6": true,
@@ -223,6 +236,9 @@ func (b *telegramBot) handleExperienceSelection(chatID int64, expInput string) {
 
 	// Расчёт среднего
 	avgMin, avgMax := b.calculateAverage(salaries)
+
+	// После расчёта и перед отправкой ответа:
+	_ = b.userRepository.IncrementCalculation(userID)
 
 	// Формируем ответ
 	var response string

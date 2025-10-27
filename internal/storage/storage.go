@@ -45,4 +45,20 @@ CREATE TABLE IF NOT EXISTS salaries (
 		log.Fatal("Не удалось создать таблицу salaries:", err)
 	}
 	log.Println("Таблица salaries готова")
+
+	userTableQuery := `
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    first_name TEXT,
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    calculation_count INTEGER DEFAULT 0
+);`
+
+	_, err = s.DB.Exec(userTableQuery)
+	if err != nil {
+		log.Fatal("Не удалось создать таблицу users:", err)
+	}
+	log.Println("Таблица users готова")
 }
